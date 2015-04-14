@@ -1,7 +1,11 @@
 (ns tsd_proxy.core
   (:gen-class))
 
-(use 'lamina.core 'lamina.api 'lamina.connections 'lamina.stats 'aleph.tcp 'gloss.core)
+(use 'lamina.core 'lamina.stats 'aleph.tcp 'gloss.core)
+
+(require 'tsd_proxy.opentsdb_consumer)
+(require 'tsd_proxy.kafka_consumer)
+(require 'tsd_proxy.influxdb_consumer)
 
 (require '[clojure.tools.logging :as log])
 (require 'clojure.edn)
@@ -17,36 +21,14 @@
      (clojure.edn/read-string
       (slurp (clojure.java.io/file cfg-file))))))
 
-(defn create-tsd-consumer [end-point]
-  (let [[host port] (clojure.string/split end-point #":")]
-    (log/info "Connecting to:" end-point)
-    (tcp-client {:name end-point,
-                 :host host,
-                 :port (Integer/parseInt port),
-                 :frame tsd-msg-format})))
-
-(defn connect-source-to-drain [source-ch end-point sink-ch]
-  (log/info "Connected to sink:" end-point)
-  (join source-ch sink-ch)
-  ; Discard any response from the consumer.
-  (ground sink-ch)
-  (on-error sink-ch
-            (fn []
-              (log/warn "Error talking to" end-point "- closing channel.")
-              (close sink-ch))))
-
-(defn setup-sink [source-ch end-point]
-  (let [queue-ch (permanent-channel)
-        consumer (pipelined-client
-                  #(create-tsd-consumer end-point)
-                  {:on-connected (partial connect-source-to-drain
-                                          queue-ch
-                                          end-point)})]
+(defn setup-consumer [source-ch end-point]
+  (let [consumer-fn (resolve
+                     (symbol
+                      (str (name (first end-point))
+                           "/make-consumer")))
+        connection-params (second end-point)
+        queue-ch (consumer-fn connection-params)]
     (join source-ch queue-ch)
-    ; The client is lazy, it initiates the connection only when it
-    ; actually has data to send.  To prime it, send an empty string
-    ; into the consumer.
-    (consumer "")
     queue-ch))
 
 (let [pattern-list (map re-pattern (:junk-filter (get-config config-file)))]
@@ -61,19 +43,19 @@
                 (if (re-find pattern msg)
                   true
                   (do
-                    (enqueue ch (str "Input: " msg ", blocked by: " pattern))
-                    (log/warn "Client" client-info "sent:" msg "," pattern "blocks this.")
+                    (enqueue ch (str "Input:" msg ", blocked by:" pattern))
+                    (log/warn "Client:" (:address client-info)
+                              "sent:" msg "," pattern "blocks this.")
                     false)))
               pattern-list)))
 
   (defn tsd-incoming-handler [ch client-info]
-    (log/info "New connection from:" client-info)
+    (log/info "New connection from:" (:address client-info))
     (if (empty? pattern-list)
       (join ch broadcast-ch)
       ; we have a pattern list - filter* pipes the channels messages
       ; through the list, we then join the output to the broadcast.
-      (join (filter* (make-filter ch client-info) ch)
-            broadcast-ch))))
+      (join (filter* (make-filter ch client-info) ch) broadcast-ch))))
 
 (defn start-tsd-listener []
   "Start the tcp listener and return a zero parameter function that
@@ -89,7 +71,7 @@
 
 (defn enable-listener? [queue-channels msg-rate]
   (if (> (queue-length queue-channels)
-         (* (:limit (get-config config-file)) msg-rate))
+         (:limit (get-config config-file)))
     false
     true))
 
@@ -102,7 +84,7 @@
       ; we don't have too many messages pending in the queues, start
       ; the listener if it's not already alive.
       (when (not @listener-enabled?)
-        (log/warn "Queue channels are empty, enabling listener")
+        (log/warn "Queue channels have room, enabling listener.")
         (reset! listener-enabled? (start-tsd-listener)))
       ; kill the listener here if it's up and running.
       (when @listener-enabled?
@@ -115,8 +97,8 @@
   (let [stats-ch (rate broadcast-ch)
         queue-channels (doall
                         (for [end-point (:end-points (get-config config-file))]
-                          (do (log/info "Enabling" end-point)
-                              (setup-sink broadcast-ch end-point))))
+                          (do (log/info "Enabling:" end-point)
+                              (setup-consumer broadcast-ch end-point))))
         controller (server-controller queue-channels)]
     (reset! listener-enabled? (start-tsd-listener))
     ; the rate function above enqueues the rate of incoming messages
