@@ -1,4 +1,4 @@
-(defproject tsd_proxy "0.2.1"
+(defproject tsd_proxy "0.2.2"
   :description "A proxy to accept OpenTSDB traffic and send it to multiple destinations"
   :url "http://opentsdb.net"
   :license {:name "Apache License, Version 2.0"

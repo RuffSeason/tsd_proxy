@@ -7,7 +7,7 @@
 (require 'clj-kafka.zk)
 
 (defn send-to-kafka [queue-ch consumer-ch producer metric-string]
-  (let [metric-string-parts (clojure.string/split metric-string #"\s")]
+  (let [metric-string-parts (clojure.string/split metric-string #"\s+")]
     (if (> (count metric-string-parts) 2)
       (let [metric-parts (rest metric-string-parts)
             metric-name (.getBytes (first metric-parts))

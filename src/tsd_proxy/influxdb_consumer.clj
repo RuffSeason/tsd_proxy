@@ -15,7 +15,7 @@
   "converts 'put proc.loadavg 1430641159 0.2 type=1m host=foo' into a
    hash that looks like {'proc.loadavg' {'columns' ('time' 'value'
    'host' 'type'), 'points' (1430641159, 0.2, 'foo', '1m')}}"
-  (let [metric-string-parts (clojure.string/split tcollector-metric-line #" +")]
+  (let [metric-string-parts (clojure.string/split tcollector-metric-line #"\s+")]
     (if (> (count metric-string-parts) 2)
       (let [[_ metric-name ts value & t-v-pairs] metric-string-parts
             tag-value-pairs (sort
