@@ -1,7 +1,7 @@
 (ns tsd_proxy.core
   (:gen-class))
 
-(use 'lamina.core 'lamina.stats 'aleph.tcp 'gloss.core)
+(use 'lamina.core 'lamina.time 'aleph.tcp 'gloss.core)
 
 (require 'tsd_proxy.opentsdb_consumer)
 (require 'tsd_proxy.kafka_consumer)
@@ -69,7 +69,7 @@
 (defn queue-length [queue-channels]
   (reduce + (map count queue-channels)))
 
-(defn enable-listener? [queue-channels msg-rate]
+(defn enable-listener? [queue-channels]
   (if (> (queue-length queue-channels)
          (:limit (get-config config-file)))
     false
@@ -79,8 +79,8 @@
   "generates a controller function that decides if the listener should
    be shut down based on the incoming message rate and the number of
    messages queued in the channels."
-  (fn [msg-rate]
-    (if (enable-listener? queue-channels msg-rate)
+  (fn [_]
+    (if (enable-listener? queue-channels)
       ; we don't have too many messages pending in the queues, start
       ; the listener if it's not already alive.
       (when (not @listener-enabled?)
@@ -94,16 +94,12 @@
         (reset! listener-enabled? false)))))
 
 (defn -main [& args]
-  (let [stats-ch (rate broadcast-ch)
-        queue-channels (doall
+  (let [queue-channels (doall
                         (for [end-point (:end-points (get-config config-file))]
                           (do (log/info "Enabling:" end-point)
                               (setup-consumer broadcast-ch end-point))))
-        controller (server-controller queue-channels)]
+        controller-fn (server-controller queue-channels)]
     (reset! listener-enabled? (start-tsd-listener))
-    ; the rate function above enqueues the rate of incoming messages
-    ; (into the broadcast channel) into the stats channel every
-    ; second.  We use the controller as the callback to regulate the
-    ; tcp listener.
-    (receive-all stats-ch controller)))
+    ; Invoke the controller every second to regulate the tcp listener.
+    (invoke-repeatedly 1000 controller-fn)))
 
