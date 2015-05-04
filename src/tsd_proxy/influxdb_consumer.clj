@@ -64,10 +64,15 @@
              (Thread/sleep 1000)
              (restart nil))}
           (fn [_]
-            (sync-http-request
-             {:method :post
-              :url url
-              :body (clojure.data.json/write-str influxdb-data-points)}))))))))
+            (let [response-code (:status
+                                 (sync-http-request
+                                  {:method :post
+                                   :url url
+                                   :body (clojure.data.json/write-str influxdb-data-points)}))]
+              (when (not (= 200 response-code))
+                (log/warn "Got response code:" response-code "from Influxdb, retrying in 1s.")
+                (Thread/sleep 1000)
+                (restart nil))))))))))
 
 (defn make-consumer [url]
   "This consumer lets metrics queue up for 2s, and then sends them to
