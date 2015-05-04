@@ -11,21 +11,24 @@
     (catch RuntimeException e
       s)))
 
+(defn string-to-tv-tupples [s]
+  (clojure.string/split s #"="))
+
+(defn combiner [[ts vs] [t v]]
+  [(conj ts t) (conj vs v)])
+
+(defn extract-tags-and-values [t-v-strings]
+  "Takes ['k1=v1' 'k2=v2' 'k3=v3'] and returns [['k1' 'k2' 'k3'] ['v1' 'v2' 'v3]]"
+  (reduce combiner [[] []] (map string-to-tv-tupples (sort t-v-strings))))
+
 (defn make-influxdb-metric [tcollector-metric-line]
   "converts 'put proc.loadavg 1430641159 0.2 type=1m host=foo' into a
    hash that looks like {'proc.loadavg' {'columns' ('time' 'value'
    'host' 'type'), 'points' (1430641159, 0.2, 'foo', '1m')}}"
   (let [metric-string-parts (clojure.string/split tcollector-metric-line #"\s+")]
     (if (> (count metric-string-parts) 2)
-      (let [[_ metric-name ts value & t-v-pairs] metric-string-parts
-            tag-value-pairs (sort
-                             (into {}
-                                   (map
-                                    (fn [t-v-pair]
-                                      (clojure.string/split t-v-pair #"="))
-                                    t-v-pairs)))
-            tags (into [] (map first tag-value-pairs))
-            values (into [] (map second tag-value-pairs))]
+      (let [[_ metric-name ts value & t-v-strings] metric-string-parts
+            [tags values] (extract-tags-and-values t-v-strings)]
         {metric-name {"columns" (into ["time" "value"] tags)
                       "points" [(map number->string (into [ts value] values))]}})
       (log/warn "Invalid metric:" tcollector-metric-line))))
