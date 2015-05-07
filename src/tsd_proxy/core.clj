@@ -77,8 +77,8 @@
 
 (defn server-controller [queue-channels]
   "generates a controller function that decides if the listener should
-   be shut down based on the incoming message rate and the number of
-   messages queued in the channels."
+   be shut down based on the number of messages queued in the
+   channels."
   (fn [_]
     (if (enable-listener? queue-channels)
       ; we don't have too many messages pending in the queues, start
