@@ -48,7 +48,7 @@
      (fn [[k v]] (into {"name" k} v))
      grouped-metrics)))
 
-(defn send-to-influxdb [queue-ch client cancel-cb-fn]
+(defn send-to-influxdb [queue-ch url cancel-cb-fn]
   (let [num-points (count queue-ch)]
     (if (> num-points 0)
       (let [influxdb-data-points (aggregate-metrics
@@ -58,47 +58,39 @@
         (wait-for-result
          (run-pipeline
           1
-          {:error-handler
-           (fn [ex]
-             (log/warn "Got http exception:" ex)
-             (log/warn "Could not send msg id:"
-                       (System/identityHashCode influxdb-data-points)
-                       "to Influxdb, re-trying in 1s.")
-             (Thread/sleep 1000)
-             (reset-connection client)
-             (restart 1))}
-
           (fn [attempt]
-            (log/info "Sending" num-points "metrics to Influxdb.")
-            (let [response (wait-for-result
-                            (client
-                             {:body (clojure.data.json/write-str influxdb-data-points)})
-                            5000)
-                  response-code (:status response)]
-              (when (not (= 200 response-code))
-                (if (> attempt 3)
-                  (do
-                    (log/warn "Failed to upload metrics to influxdb, response message:"
-                              (.toString (:body response)
-                                         (java.nio.charset.Charset/defaultCharset)))
-                    (log/warn "We made 3 attempts to send the following metrics, giving up and moving on.")
-                    (log/warn (clojure.data.json/write-str influxdb-data-points))
-                    (complete nil))
-                  (do
-                    (log/warn "Attempt:" attempt
-                              "Got response code:" response-code
-                              "retrying in 1s.")
+            (if (> attempt 3)
+              (do
+                (log/warn "We made 3 attempts to send the following metrics, giving up and moving on.")
+                (log/warn (clojure.data.json/write-str influxdb-data-points))
+                (complete nil))
+              (do
+                (log/info "Attempt:" attempt "sending" num-points "metrics to Influxdb.")
+                (try
+                  (let [response (sync-http-request
+                                  {:method :post
+                                   :url url
+                                   :body (clojure.data.json/write-str influxdb-data-points)}
+                                  5000)
+                        response-code (:status response)]
+                    (when (not (= 200 response-code))
+                      (log/warn "Attempt:" attempt
+                                "Got response code:" response-code
+                                "retrying in 1s.")
+                      (Thread/sleep 1000)
+                      (restart (inc attempt)))
+                    (log/info "Added" num-points "metrics to Influxdb."))
+                  (catch Exception ex
+                    (log/warn "Got exception:" ex)
+                    (log/warn "Re-trying in 1s.")
                     (Thread/sleep 1000)
-                    (restart (inc attempt)))))
-              (log/info "Added" num-points "to Influxdb."))))))
-          (log/warn "Queue empty, nothing to send to Influxdb"))))
+                    (restart (inc attempt))))))))))
+      (log/warn "Queue empty, nothing to send to Influxdb"))))
 
 (defn make-consumer [url]
   "This consumer lets metrics queue up for 2s, and then sends them to
    influxdb as a batch (makes it more efficient for influxdb)."
-  (let [qch (permanent-channel)
-        influx-client (http-client {:url url, :method :post})]
-    (influx-client nil)
-    (invoke-repeatedly 2000 (partial send-to-influxdb qch influx-client))
+  (let [qch (permanent-channel)]
+    (invoke-repeatedly 2000 (partial send-to-influxdb qch url))
     qch))
 

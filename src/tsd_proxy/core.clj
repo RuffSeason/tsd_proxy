@@ -101,5 +101,7 @@
         controller-fn (server-controller queue-channels)]
     (reset! listener-enabled? (start-tsd-listener))
     ; Invoke the controller every second to regulate the tcp listener.
-    (invoke-repeatedly 1000 controller-fn)))
+    (invoke-repeatedly 1000 controller-fn)
+    ; waits here forever
+    (wait-for-message (channel))))
 
