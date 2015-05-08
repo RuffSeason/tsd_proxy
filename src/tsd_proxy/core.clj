@@ -70,10 +70,8 @@
   (reduce + (map count queue-channels)))
 
 (defn enable-listener? [queue-channels]
-  (if (> (queue-length queue-channels)
-         (:limit (get-config config-file)))
-    false
-    true))
+  (< (queue-length queue-channels)
+         (:limit (get-config config-file))))
 
 (defn server-controller [queue-channels]
   "generates a controller function that decides if the listener should
