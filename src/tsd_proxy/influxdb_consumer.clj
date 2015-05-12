@@ -24,7 +24,7 @@
 (defn make-influxdb-metric [tcollector-metric-line]
   "converts 'put proc.loadavg 1430641159 0.2 type=1m host=foo' into a
    hash that looks like {'proc.loadavg' {'columns' ('time' 'value'
-   'host' 'type'), 'points' (1430641159, 0.2, 'foo', '1m')}}"
+   'host' 'type'), 'points' [(1430641159, 0.2, 'foo', '1m')]}}"
   (let [metric-string-parts (clojure.string/split tcollector-metric-line #"\s+")]
     (if (>= (count metric-string-parts) 4)
       (let [[_ metric-name ts value & t-v-strings] metric-string-parts
@@ -39,7 +39,7 @@
 
 (defn aggregate-metrics [influxdb-metrics]
   "influxdb-metrics is a seq of hashes that look like {'metric-name'
-   {'columns' (c1 c2 ..), 'points' (p1 p2 ..)}}.  We aggregate the
+   {'columns' (c1 c2 ..), 'points' [(p1 p2 ..)]}}.  We aggregate the
    influxdb-metrics based on the metric name.  The hash is then
    transformed into a seq that looks like ({'name' 'metric-name',
    'columns' (c1 c2 ..), 'points' ((p11 p12 ..) (p21 p22 ..))} ..)"
