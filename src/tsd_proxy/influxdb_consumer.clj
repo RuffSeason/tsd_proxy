@@ -26,7 +26,7 @@
    hash that looks like {'proc.loadavg' {'columns' ('time' 'value'
    'host' 'type'), 'points' (1430641159, 0.2, 'foo', '1m')}}"
   (let [metric-string-parts (clojure.string/split tcollector-metric-line #"\s+")]
-    (if (> (count metric-string-parts) 2)
+    (if (>= (count metric-string-parts) 4)
       (let [[_ metric-name ts value & t-v-strings] metric-string-parts
             [tags values] (extract-tags-and-values t-v-strings)]
         {metric-name {"columns" (into ["time" "value"] tags)
@@ -48,44 +48,53 @@
      (fn [[k v]] (into {"name" k} v))
      grouped-metrics)))
 
+(defn post-datapoints-to-influxdb [url json-body]
+  (try
+    (let [response (sync-http-request
+                    {:method :post
+                     :url url
+                     :body json-body}
+                    5000)
+          response-code (:status response)]
+      (= 200 response-code))
+    (catch Exception ex
+      (log/warn "Got exception:" ex)
+      false)))
+
 (defn send-to-influxdb [queue-ch url cancel-cb-fn]
   (let [num-points (count queue-ch)]
-    (if (> num-points 0)
+    (if (= num-points 0)
+      (log/info "Queue empty, nothing to send to Influxdb")
       (let [influxdb-data-points (aggregate-metrics
                                   (map make-influxdb-metric
                                        (channel->lazy-seq
-                                        (take* num-points queue-ch))))]
+                                        (take* num-points queue-ch))))
+            json-body (clojure.data.json/write-str influxdb-data-points)]
+
         (wait-for-result
          (run-pipeline
           1
-          (fn [attempt]
-            (if (> attempt 3)
+
+          (fn [attempt-num]
+            (if (< attempt-num 4)
+              (do
+                (log/info "Attempt:" attempt-num "sending" num-points "metrics to Influxdb.")
+                (if (post-datapoints-to-influxdb url json-body)
+                  (do
+                    (log/info "Added" num-points "metrics to Influxdb.")
+                    (complete true))
+                  (do
+                    (log/warn "Sleeping for 1s, before trying again.")
+                    (inc attempt-num))))
               (do
                 (log/warn "We made 3 attempts to send the following metrics, giving up and moving on.")
-                (log/warn (clojure.data.json/write-str influxdb-data-points))
-                (complete nil))
-              (do
-                (log/info "Attempt:" attempt "sending" num-points "metrics to Influxdb.")
-                (try
-                  (let [response (sync-http-request
-                                  {:method :post
-                                   :url url
-                                   :body (clojure.data.json/write-str influxdb-data-points)}
-                                  5000)
-                        response-code (:status response)]
-                    (when (not (= 200 response-code))
-                      (log/warn "Attempt:" attempt
-                                "Got response code:" response-code
-                                "retrying in 1s.")
-                      (Thread/sleep 1000)
-                      (restart (inc attempt)))
-                    (log/info "Added" num-points "metrics to Influxdb."))
-                  (catch Exception ex
-                    (log/warn "Got exception:" ex)
-                    (log/warn "Re-trying in 1s.")
-                    (Thread/sleep 1000)
-                    (restart (inc attempt))))))))))
-      (log/warn "Queue empty, nothing to send to Influxdb"))))
+                (log/warn json-body)
+                (complete false))))
+
+          (wait-stage 1000)
+
+          (fn [attempt-num]
+            (restart attempt-num))))))))
 
 (defn make-consumer [url]
   "This consumer lets metrics queue up for 2s, and then sends them to

@@ -78,13 +78,13 @@
    be shut down based on the number of messages queued in the
    channels."
   (fn [_]
+    "listener-enabled? is an atom that holds the server shutdown
+     function when the server (listener) is enabled, otherwise it is
+     set to false."
     (if (enable-listener? queue-channels)
-      ; we don't have too many messages pending in the queues, start
-      ; the listener if it's not already alive.
       (when (not @listener-enabled?)
         (log/warn "Queue channels have room, enabling listener.")
         (reset! listener-enabled? (start-tsd-listener)))
-      ; kill the listener here if it's up and running.
       (when @listener-enabled?
         (log/warn "Queue channels have" (queue-length queue-channels) "entries.")
         (log/warn "Shutting down listener till we catch up.")
@@ -98,8 +98,7 @@
                               (setup-consumer broadcast-ch end-point))))
         controller-fn (server-controller queue-channels)]
     (reset! listener-enabled? (start-tsd-listener))
-    ; Invoke the controller every second to regulate the tcp listener.
     (invoke-repeatedly 1000 controller-fn)
-    ; waits here forever
+    ; wait here forever
     (wait-for-message (channel))))
 
