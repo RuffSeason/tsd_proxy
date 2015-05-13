@@ -53,8 +53,7 @@
     (let [response (sync-http-request
                     {:method :post
                      :url url
-                     :body json-body}
-                    5000)
+                     :body json-body})
           response-code (:status response)]
       (= 200 response-code))
     (catch Exception ex
@@ -76,20 +75,14 @@
           1
 
           (fn [attempt-num]
-            (if (< attempt-num 4)
+            (log/info "Attempt:" attempt-num "sending" num-points "metrics to Influxdb.")
+            (if (post-datapoints-to-influxdb url json-body)
               (do
-                (log/info "Attempt:" attempt-num "sending" num-points "metrics to Influxdb.")
-                (if (post-datapoints-to-influxdb url json-body)
-                  (do
-                    (log/info "Added" num-points "metrics to Influxdb.")
-                    (complete true))
-                  (do
-                    (log/warn "Sleeping for 1s, before trying again.")
-                    (inc attempt-num))))
+                (log/info "Added" num-points "metrics to Influxdb.")
+                (complete true))
               (do
-                (log/warn "We made 3 attempts to send the following metrics, giving up and moving on.")
-                (log/warn json-body)
-                (complete false))))
+                (log/warn "Failed to add datapoints, sleeping for 1s before trying again.")
+                (inc attempt-num))))
 
           (wait-stage 1000)
 
