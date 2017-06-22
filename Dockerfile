@@ -29,4 +29,4 @@ COPY * /root/docker.info/
 WORKDIR /opt/tsd_proxy
 RUN lein uberjar
 
-CMD ['java','-jar','/opt/tsd_proxy/target/tsd_proxy-0.2.3-standalone.jar']
+CMD ["java","-jar","/opt/tsd_proxy/target/tsd_proxy-0.2.3-standalone.jar"]
